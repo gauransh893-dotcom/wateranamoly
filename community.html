@@ -48,6 +48,38 @@
     color:#fff;
     cursor:pointer;
   }
+  .emergency-btn{
+    background:#e74c3c;
+    color:#fff;
+    border:2px solid #fff;
+    font-weight:bold;
+    font-size:12px;
+    padding:5px 10px;
+    border-radius:14px;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    gap:4px;
+  }
+  .emergency-btn:hover{
+    background:#c0392b;
+  }
+  .report-issue-btn{
+    background:#fff;
+    color:#e74c3c;
+    border:2px solid #e74c3c;
+    font-weight:bold;
+    font-size:12px;
+    padding:5px 10px;
+    border-radius:14px;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    gap:4px;
+  }
+  .report-issue-btn:hover{
+    background:#fdecea;
+  }
 
   /* ---------- feed ---------- */
   .feed{
@@ -62,6 +94,7 @@
     margin-top:60px;
   }
   .post{
+    position:relative;
     background:#fff;
     border-radius:12px;
     padding:10px 12px 8px;
@@ -74,6 +107,7 @@
     font-weight:600;
     color:#087ea4;
     margin-bottom:2px;
+    padding-right:60px;
   }
   .post .text{
     font-size:14.5px;
@@ -95,6 +129,63 @@
   }
   .post.pinned{
     border-left:3px solid #E3A72B;
+  }
+
+  /* reported / resolved highlighting */
+  .post.reported{
+    background:#fdecea;
+    border-left:4px solid #e74c3c;
+  }
+  .post.reported.resolved{
+    background:#e8f8ec;
+    border-left:4px solid #2ecc71;
+  }
+
+  /* report flag button - top right of each post */
+  .report-btn{
+    position:absolute;
+    top:8px;
+    right:8px;
+    background:#e74c3c;
+    color:#fff;
+    border:1px solid #fff;
+    border-radius:12px;
+    padding:2px 8px;
+    font-size:11px;
+    font-weight:600;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    gap:3px;
+  }
+  .report-btn:hover{
+    background:#c0392b;
+  }
+
+  /* status badge shown once reported */
+  .status-row{
+    margin-top:8px;
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .resolve-btn{
+    border:none;
+    border-radius:12px;
+    padding:3px 10px;
+    font-size:11px;
+    font-weight:600;
+    cursor:pointer;
+  }
+  .resolve-btn.pending{
+    background:#fdecea;
+    color:#c0392b;
+    border:1px solid #e74c3c;
+  }
+  .resolve-btn.done{
+    background:#e8f8ec;
+    color:#1e8449;
+    border:1px solid #2ecc71;
   }
 
   .reactions{
@@ -266,6 +357,12 @@
   <div class="topbar">
     <h1>Community</h1>
     <div style="display:flex; align-items:center; gap:8px;">
+      <button class="report-issue-btn" onclick="openReportIssue()" title="Report a water issue">
+        🚩 Report
+      </button>
+      <button class="emergency-btn" onclick="sendEmergency()" title="Send emergency contacts to chat">
+        🚨 Emergency
+      </button>
       <a href="dashboard.html" style="color:#fff; text-decoration:none; font-size:12px; opacity:0.9; background:rgba(255,255,255,0.15); padding:5px 10px; border-radius:14px;">Dashboard</a>
       <button class="you" id="youBtn" onclick="logout()" title="Log out">…</button>
     </div>
@@ -419,12 +516,39 @@ function renderFeed(messages){
       .map(r => `<button class="react-btn" onclick="toggleReaction('${m.id}','${r}')">${r}<span class="react-count">${counts[r]}</span></button>`)
       .join('');
     const picker = EMOJIS.map(r => `<span onclick="toggleReaction('${m.id}','${r}')">${r}</span>`).join('');
+
+    const isReported = !!m.reported;
+    const isResolved = !!m.resolved;
+
+    const postClasses = [
+      'post',
+      m.pinned ? 'pinned' : '',
+      isReported ? 'reported' : '',
+      (isReported && isResolved) ? 'resolved' : ''
+    ].filter(Boolean).join(' ');
+
+    // Top-right button: flag it (if not yet reported), or nothing if already reported
+    const reportButtonHtml = isReported
+      ? ''
+      : `<button class="report-btn" onclick="reportMessage('${m.id}')">🚩 Report</button>`;
+
+    // Status row: only shows once a message has been reported
+    const statusRowHtml = isReported
+      ? `<div class="status-row">
+           <button class="resolve-btn ${isResolved ? 'done' : 'pending'}" onclick="toggleResolve('${m.id}')">
+             ${isResolved ? '✅ Resolved' : '⏳ Not Resolved — click when fixed'}
+           </button>
+         </div>`
+      : '';
+
     return `
-      <div class="post ${m.pinned ? 'pinned' : ''}">
+      <div class="${postClasses}">
+        ${reportButtonHtml}
         <div class="name">${escapeHtml(m.author_name || 'Guest')}</div>
         ${m.message ? `<div class="text">${escapeHtml(m.message)}</div>` : ''}
         ${m.image_data ? `<img src="${m.image_data}">` : ''}
         <div class="time">${timeAgo(m.created_at)}</div>
+        ${statusRowHtml}
         <div class="reactions">
           ${activeButtons}
           <button class="add-react" onclick="togglePicker(event,'${m.id}')">
@@ -459,6 +583,68 @@ async function toggleReaction(messageId, reaction){
     });
     loadMessages();
   } catch (e) {}
+}
+
+// -------- top-bar report button --------
+async function openReportIssue(){
+  const text = window.prompt("Describe the water issue you're reporting:");
+  if (!text || !text.trim()) return;
+
+  try {
+    await fetch(`${API}/report-issue`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        client_id: clientId,
+        name: userName || 'Guest',
+        message: text.trim()
+      })
+    });
+    loadMessages();
+  } catch (e) {
+    alert("Couldn't send your report. Check your connection.");
+  }
+}
+
+// -------- per-message report / resolve --------
+async function reportMessage(messageId){
+  try {
+    await fetch(`${API}/report/${messageId}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({client_id: clientId})
+    });
+    loadMessages();
+  } catch (e) {
+    alert("Couldn't report this message. Check your connection.");
+  }
+}
+
+async function toggleResolve(messageId){
+  try {
+    await fetch(`${API}/resolve/${messageId}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({client_id: clientId})
+    });
+    loadMessages();
+  } catch (e) {
+    alert("Couldn't update status. Check your connection.");
+  }
+}
+
+// -------- emergency broadcast --------
+async function sendEmergency(){
+  try {
+    await fetch(`${API}/emergency`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({client_id: clientId, name: userName || 'Guest'})
+    });
+    loadMessages();
+  } catch (e) {
+    alert("Couldn't send emergency contacts. Check your connection.");
+  }
 }
 
 // -------- init --------

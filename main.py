@@ -2,7 +2,12 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(*args, **kwargs):
+        pass
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -116,6 +121,26 @@ class ReactionCreate(BaseModel):
 
 
 class PinCreate(BaseModel):
+    client_id: str
+
+
+class ReportCreate(BaseModel):
+    client_id: str
+
+
+class ReportIssueCreate(BaseModel):
+    client_id: str
+    name: str = Field(
+        default="Guest",
+        max_length=50
+    )
+    message: str = Field(
+        default="",
+        max_length=2000
+    )
+
+
+class ResolveCreate(BaseModel):
     client_id: str
 
 
@@ -310,27 +335,6 @@ def send_message(data: MessageCreate):
         )
 
     # -----------------------------------------
-    # Emergency command
-    # -----------------------------------------
-
-    if message.lower().startswith("/emergency"):
-
-        emergency_message = message[
-            len("/emergency"):
-        ].strip()
-
-        return {
-            "success": True,
-            "type": "emergency",
-            "message": (
-                emergency_message
-                if emergency_message
-                else "Emergency contacts ready."
-            ),
-            "contacts": EMERGENCY_CONTACTS
-        }
-
-    # -----------------------------------------
     # Make sure user exists
     # -----------------------------------------
 
@@ -361,7 +365,9 @@ def send_message(data: MessageCreate):
                 "message": message,
                 "image_data": image,
                 "message_type": "chat",
-                "pinned": False
+                "pinned": False,
+                "reported": False,
+                "resolved": False
             }
         )
         .execute()
@@ -423,7 +429,9 @@ def create_post(data: PostCreate):
                 "message": message,
                 "image_data": image,
                 "message_type": "post",
-                "pinned": False
+                "pinned": False,
+                "reported": False,
+                "resolved": False
             }
         )
         .execute()
@@ -584,7 +592,164 @@ def pin_message(
 
 
 # =========================================================
-# EMERGENCY
+# REPORT A MESSAGE
+# (highlights it light red + pins it to top)
+# =========================================================
+
+@app.post("/api/community/report/{message_id}")
+def report_message(
+    message_id: str,
+    data: ReportCreate
+):
+
+    check_supabase()
+
+    result = (
+        supabase
+        .table("community_messages")
+        .select("id")
+        .eq("id", message_id)
+        .limit(1)
+        .execute()
+    )
+
+    if not result.data:
+        raise HTTPException(
+            status_code=404,
+            detail="Message not found."
+        )
+
+    (
+        supabase
+        .table("community_messages")
+        .update(
+            {
+                "reported": True,
+                "pinned": True,
+                "resolved": False
+            }
+        )
+        .eq("id", message_id)
+        .execute()
+    )
+
+    return {
+        "success": True,
+        "reported": True
+    }
+
+
+# =========================================================
+# REPORT AN ISSUE  (top-bar Report button)
+# Creates a brand new message that is immediately
+# highlighted red and pinned to the top.
+# =========================================================
+
+@app.post("/api/community/report-issue")
+def report_issue(data: ReportIssueCreate):
+
+    check_supabase()
+
+    client_id = data.client_id.strip()
+    name = data.name.strip() or "Guest"
+    message = data.message.strip()
+
+    if not message:
+        raise HTTPException(
+            status_code=400,
+            detail="Please describe the issue."
+        )
+
+    # Make sure user exists
+    (
+        supabase
+        .table("community_users")
+        .upsert(
+            {
+                "client_id": client_id,
+                "name": name
+            },
+            on_conflict="client_id"
+        )
+        .execute()
+    )
+
+    result = (
+        supabase
+        .table("community_messages")
+        .insert(
+            {
+                "client_id": client_id,
+                "author_name": name,
+                "message": message,
+                "image_data": None,
+                "message_type": "report",
+                "pinned": True,
+                "reported": True,
+                "resolved": False
+            }
+        )
+        .execute()
+    )
+
+    return {
+        "success": True,
+        "type": "report",
+        "message": result.data[0] if result.data else None
+    }
+
+
+# =========================================================
+# TOGGLE RESOLVED / NOT RESOLVED
+# (red highlight -> green when marked resolved)
+# =========================================================
+
+@app.post("/api/community/resolve/{message_id}")
+def resolve_message(
+    message_id: str,
+    data: ResolveCreate
+):
+
+    check_supabase()
+
+    result = (
+        supabase
+        .table("community_messages")
+        .select("id,resolved")
+        .eq("id", message_id)
+        .limit(1)
+        .execute()
+    )
+
+    if not result.data:
+        raise HTTPException(
+            status_code=404,
+            detail="Message not found."
+        )
+
+    current_value = bool(result.data[0]["resolved"])
+    new_value = not current_value
+
+    (
+        supabase
+        .table("community_messages")
+        .update(
+            {
+                "resolved": new_value
+            }
+        )
+        .eq("id", message_id)
+        .execute()
+    )
+
+    return {
+        "success": True,
+        "resolved": new_value
+    }
+
+
+# =========================================================
+# EMERGENCY  (broadcasts contact list into the shared chat)
 # =========================================================
 
 @app.post("/api/community/emergency")
@@ -592,20 +757,58 @@ def emergency(
     data: EmergencyCreate
 ):
 
+    check_supabase()
+
+    client_id = data.client_id.strip()
     name = data.name.strip() or "Guest"
-    message = data.message.strip()
+
+    contact_lines = "\n".join(
+        f"📞 {c['name']}: {c['phone']}"
+        for c in EMERGENCY_CONTACTS
+    )
+
+    broadcast_text = (
+        f"🚨 Emergency contacts requested by {name}\n\n"
+        f"{contact_lines}"
+    )
+
+    # Make sure user exists
+    (
+        supabase
+        .table("community_users")
+        .upsert(
+            {
+                "client_id": client_id,
+                "name": name
+            },
+            on_conflict="client_id"
+        )
+        .execute()
+    )
+
+    # Insert as a real chat message so everyone sees it
+    result = (
+        supabase
+        .table("community_messages")
+        .insert(
+            {
+                "client_id": client_id,
+                "author_name": "WaterSafe Alerts",
+                "message": broadcast_text,
+                "image_data": None,
+                "message_type": "emergency",
+                "pinned": False,
+                "reported": False,
+                "resolved": False
+            }
+        )
+        .execute()
+    )
 
     return {
         "success": True,
         "type": "emergency",
-        "message": (
-            f"Emergency request from {name}."
-            + (
-                f" Message: {message}"
-                if message
-                else ""
-            )
-        ),
+        "message": result.data[0] if result.data else None,
         "contacts": EMERGENCY_CONTACTS
     }
 
