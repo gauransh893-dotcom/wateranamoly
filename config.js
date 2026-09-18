@@ -4,8 +4,8 @@
 // Use the PUBLISHABLE key here (sb_publishable_...), NOT the secret key.
 // The publishable key is safe to expose in browser code.
 // =========================================================
-const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_YOUR_KEY_HERE";
+const SUPABASE_URL = "https://yworpibfejlemnwctper.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_secret_rDccaB2uOJMxd4WsDPk4lA_JxjLC5cm";
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
