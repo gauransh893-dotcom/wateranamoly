@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WaterSafe - Login</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #dff6ff, #eefcff);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .login-box {
+            width: 380px;
+            background: white;
+            padding: 35px;
+            border-radius: 18px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+            text-align: center;
+        }
+
+        .logo { font-size: 42px; margin-bottom: 5px; }
+        h1 { color: #087ea4; margin: 5px 0; }
+        .subtitle { color: #666; margin-bottom: 20px; }
+
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-radius: 9px;
+            overflow: hidden;
+            border: 1px solid #ccc;
+        }
+        .tabs button {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            background: #f3f8fa;
+            color: #555;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 0;
+        }
+        .tabs button.active {
+            background: #087ea4;
+            color: white;
+        }
+
+        .input-box { text-align: left; margin-bottom: 18px; }
+
+        label {
+            display: block;
+            margin-bottom: 7px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        input {
+            width: 100%;
+            padding: 13px;
+            border: 1px solid #ccc;
+            border-radius: 9px;
+            font-size: 15px;
+        }
+        input:focus { outline: none; border-color: #087ea4; }
+
+        button[type="submit"] {
+            width: 100%;
+            padding: 13px;
+            border: none;
+            border-radius: 9px;
+            background: #087ea4;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        button[type="submit"]:hover { background: #05627f; }
+        button[type="submit"]:disabled { opacity: 0.6; cursor: default; }
+
+        .msg {
+            margin-top: 14px;
+            font-size: 13.5px;
+            min-height: 18px;
+        }
+        .msg.error { color: #c0392b; }
+        .msg.ok { color: #217a2d; }
+
+        #nameField { display: none; }
+    </style>
+</head>
+
+<body>
+
+    <div class="login-box">
+
+        <div class="logo">💧</div>
+        <h1>WaterSafe</h1>
+        <p class="subtitle">Community Water Health Monitor</p>
+
+        <div class="tabs">
+            <button type="button" id="tabLogin" class="active" onclick="setMode('login')">Log in</button>
+            <button type="button" id="tabSignup" onclick="setMode('signup')">Sign up</button>
+        </div>
+
+        <form id="authForm" onsubmit="handleSubmit(event)">
+
+            <div class="input-box" id="nameField">
+                <label>Your name</label>
+                <input type="text" id="fullName" placeholder="Enter your name">
+            </div>
+
+            <div class="input-box">
+                <label>Email</label>
+                <input type="email" id="email" placeholder="Enter your email" required>
+            </div>
+
+            <div class="input-box">
+                <label>Password</label>
+                <input type="password" id="password" placeholder="Enter your password" required minlength="6">
+            </div>
+
+            <button type="submit" id="submitBtn">Log in</button>
+
+        </form>
+
+        <p class="msg" id="msg"></p>
+
+    </div>
+
+    <script src="config.js"></script>
+    <script>
+        let mode = 'login';
+
+        function setMode(next){
+            mode = next;
+            document.getElementById('tabLogin').classList.toggle('active', mode === 'login');
+            document.getElementById('tabSignup').classList.toggle('active', mode === 'signup');
+            document.getElementById('nameField').style.display = mode === 'signup' ? 'block' : 'none';
+            document.getElementById('submitBtn').textContent = mode === 'signup' ? 'Create account' : 'Log in';
+            document.getElementById('msg').textContent = '';
+        }
+
+        async function handleSubmit(e){
+            e.preventDefault();
+
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+            const fullName = document.getElementById('fullName').value.trim();
+            const msg = document.getElementById('msg');
+            const btn = document.getElementById('submitBtn');
+
+            btn.disabled = true;
+            msg.className = 'msg';
+            msg.textContent = mode === 'signup' ? 'Creating your account…' : 'Logging in…';
+
+            try {
+                if (mode === 'signup') {
+                    const { data, error } = await supabaseClient.auth.signUp({
+                        email,
+                        password,
+                        options: { data: { full_name: fullName || email.split('@')[0] } }
+                    });
+                    if (error) throw error;
+
+                    if (data.session) {
+                        window.location.href = "dashboard.html";
+                    } else {
+                        msg.className = 'msg ok';
+                        msg.textContent = 'Account created. Check your email to confirm, then log in.';
+                        setMode('login');
+                    }
+                } else {
+                    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+                    if (error) throw error;
+                    window.location.href = "dashboard.html";
+                }
+            } catch (err) {
+                msg.className = 'msg error';
+                msg.textContent = err.message || 'Something went wrong.';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // If already logged in, skip straight to the dashboard.
+        (async () => {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session) window.location.href = "dashboard.html";
+        })();
+    </script>
+
+</body>
+</html>
