@@ -129,6 +129,24 @@
   }
   .post.pinned{
     border-left:3px solid #E3A72B;
+    position:sticky;
+    top:0;
+    z-index:8;
+    box-shadow:0 4px 10px rgba(0,0,0,0.12);
+  }
+  .pin-badge{
+    position:absolute;
+    top:8px;
+    left:8px;
+    background:#E3A72B;
+    color:#fff;
+    font-size:10px;
+    font-weight:bold;
+    padding:2px 7px;
+    border-radius:10px;
+    display:flex;
+    align-items:center;
+    gap:2px;
   }
 
   /* reported / resolved highlighting */
@@ -532,6 +550,11 @@ function renderFeed(messages){
       ? ''
       : `<button class="report-btn" onclick="reportMessage('${m.id}')">🚩 Report</button>`;
 
+    // Pin badge shown top-left whenever the message is pinned/floating
+    const pinBadgeHtml = m.pinned
+      ? `<div class="pin-badge">📌 Pinned</div>`
+      : '';
+
     // Status row: only shows once a message has been reported
     const statusRowHtml = isReported
       ? `<div class="status-row">
@@ -543,8 +566,9 @@ function renderFeed(messages){
 
     return `
       <div class="${postClasses}">
+        ${pinBadgeHtml}
         ${reportButtonHtml}
-        <div class="name">${escapeHtml(m.author_name || 'Guest')}</div>
+        <div class="name" style="${m.pinned ? 'padding-left:70px;' : ''}">${escapeHtml(m.author_name || 'Guest')}</div>
         ${m.message ? `<div class="text">${escapeHtml(m.message)}</div>` : ''}
         ${m.image_data ? `<img src="${m.image_data}">` : ''}
         <div class="time">${timeAgo(m.created_at)}</div>
