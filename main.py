@@ -9,6 +9,7 @@ except ImportError:
         pass
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from supabase import create_client, Client
@@ -21,6 +22,16 @@ load_dotenv()  # reads variables from a .env file in the same folder, if present
 # =========================================================
 
 app = FastAPI(title="Community API")
+
+# Allow the frontend (served from the same app, but keep this permissive
+# in case the dashboard is ever opened from a different origin/port).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # =========================================================
@@ -45,6 +56,78 @@ def check_supabase():
             status_code=500,
             detail="Supabase is not configured."
         )
+
+
+# =========================================================
+# GROQ (AI CHAT ASSISTANT)
+# =========================================================
+# The API key must live in a .env file next to this script:
+#
+#   GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxxxxxx
+#
+# NEVER hardcode the key in source. If a key was ever pasted into code,
+# chat, or committed to git, treat it as burned and rotate it in the
+# Groq console.
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+groq_client = None
+
+if GROQ_API_KEY:
+    try:
+        from groq import Groq
+        groq_client = Groq(api_key=GROQ_API_KEY)
+    except ImportError:
+        groq_client = None
+
+
+def check_groq():
+    if groq_client is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Groq is not configured. Set GROQ_API_KEY in your .env file."
+        )
+
+
+CHAT_SYSTEM_PROMPT = (
+    "You are the WaterSafe Community Health Assistant. "
+    "Help users reporting water or illness issues. "
+    "Classify reports into Level 1 (Symptoms), Level 2 (Suspected disease), "
+    "or Level 3 (Confirmed case). "
+    "Keep answers brief, empathetic, and actionable. "
+    "You may be given [SYSTEM TELEMETRY] context with sensor readings for "
+    "the user's area — use it to inform your answer, but don't dump raw "
+    "sensor jargon at the user unprompted."
+)
+
+# In-memory per-user chat history: { client_id: [ {role, content}, ... ] }
+# NOTE: this resets whenever the server restarts, and does not scale across
+# multiple server processes/workers. For anything beyond a single-process
+# prototype, move this into Supabase (a "chat_messages" table keyed by
+# client_id) the same way community_messages already works.
+chat_sessions: dict[str, list[dict]] = {}
+
+MAX_HISTORY_MESSAGES = 20  # keep the last N messages per user (excludes system prompt)
+
+
+def get_session(client_id: str) -> list[dict]:
+    if client_id not in chat_sessions:
+        chat_sessions[client_id] = [
+            {"role": "system", "content": CHAT_SYSTEM_PROMPT}
+        ]
+    return chat_sessions[client_id]
+
+
+def get_live_telemetry(area: Optional[str] = None) -> str:
+    """
+    Prototype telemetry snapshot to ground the assistant's answers.
+    Swap this out for a real Supabase query against your sensor tables
+    once those exist (e.g. supabase.table("sensor_readings")...).
+    """
+    return (
+        "[SYSTEM TELEMETRY] Turbidity: High (spike), Chlorine: Low, "
+        f"Area: {area or 'unspecified'}, Rainfall: 42mm, Flood risk: High"
+    )
 
 
 # =========================================================
@@ -150,6 +233,19 @@ class EmergencyCreate(BaseModel):
     message: str = ""
 
 
+class ChatCreate(BaseModel):
+    client_id: str
+    message: str = Field(..., max_length=2000)
+    area: Optional[str] = Field(
+        default=None,
+        description="Optional area name (e.g. 'Area C') to ground the assistant's telemetry context."
+    )
+
+
+class ChatResetCreate(BaseModel):
+    client_id: str
+
+
 # =========================================================
 # ALLOWED REACTIONS
 # =========================================================
@@ -177,6 +273,7 @@ FRONTEND_FILES = {
     "/dashboard.html": ("dashboard.html", "text/html"),
     "/community.html": ("community.html", "text/html"),
     "/config.js": ("config.js", "application/javascript"),
+    "/map.js": ("map.js", "application/javascript"),
 }
 
 
@@ -814,6 +911,84 @@ def emergency(
 
 
 # =========================================================
+# AI ASSISTANT CHAT  (the dashboard's chatbot widget)
+# =========================================================
+
+@app.post("/api/chat")
+def chat(data: ChatCreate):
+
+    check_groq()
+
+    client_id = data.client_id.strip()
+    user_message = data.message.strip()
+
+    if not client_id:
+        raise HTTPException(
+            status_code=400,
+            detail="client_id is required."
+        )
+
+    if not user_message:
+        raise HTTPException(
+            status_code=400,
+            detail="Message cannot be empty."
+        )
+
+    session = get_session(client_id)
+
+    telemetry = get_live_telemetry(data.area)
+    session.append(
+        {
+            "role": "user",
+            "content": f"{telemetry}\nUser says: {user_message}"
+        }
+    )
+
+    # Trim history so it doesn't grow unbounded (keep system prompt + last N)
+    if len(session) > MAX_HISTORY_MESSAGES + 1:
+        session[:] = [session[0]] + session[-MAX_HISTORY_MESSAGES:]
+
+    try:
+        try:
+            completion = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=session,
+                max_tokens=250,
+                temperature=0.3
+            )
+        except Exception:
+            completion = groq_client.chat.completions.create(
+                model="openai/gpt-oss-20b",
+                messages=session,
+                max_tokens=250,
+                temperature=0.3
+            )
+
+        bot_reply = completion.choices[0].message.content
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Assistant is unavailable right now: {e}"
+        )
+
+    session.append({"role": "assistant", "content": bot_reply})
+
+    return {
+        "success": True,
+        "reply": bot_reply
+    }
+
+
+@app.post("/api/chat/reset")
+def chat_reset(data: ChatResetCreate):
+    """Clears one user's conversation history (e.g. a 'New chat' button)."""
+    client_id = data.client_id.strip()
+    chat_sessions.pop(client_id, None)
+    return {"success": True}
+
+
+# =========================================================
 # CONFIG
 # =========================================================
 
@@ -823,7 +998,8 @@ def config():
     return {
         "reactions": REACTIONS,
         "emergency_contacts": EMERGENCY_CONTACTS,
-        "supabase_configured": supabase is not None
+        "supabase_configured": supabase is not None,
+        "chat_configured": groq_client is not None
     }
 
 

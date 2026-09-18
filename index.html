@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Hydro-Trace Health Assistant</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #0f172a;
+      color: #f8fafc;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .chat-container {
+      width: 480px;
+      height: 600px;
+      background: #1e293b;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .chat-header {
+      background: #0284c7;
+      padding: 16px;
+      font-weight: 600;
+      font-size: 1.1rem;
+      text-align: center;
+    }
+    #chat-box {
+      flex: 1;
+      padding: 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .message {
+      padding: 10px 14px;
+      border-radius: 8px;
+      max-width: 80%;
+      line-height: 1.4;
+      font-size: 0.95rem;
+    }
+    .user-msg {
+      background: #2563eb;
+      align-self: flex-end;
+      color: white;
+    }
+    .bot-msg {
+      background: #334155;
+      align-self: flex-start;
+      border-left: 4px solid #38bdf8;
+    }
+    .input-area {
+      display: flex;
+      padding: 12px;
+      background: #0f172a;
+      border-top: 1px solid #334155;
+      gap: 8px;
+    }
+    input {
+      flex: 1;
+      padding: 10px 14px;
+      border-radius: 6px;
+      border: 1px solid #475569;
+      background: #1e293b;
+      color: white;
+      outline: none;
+    }
+    button {
+      padding: 10px 18px;
+      background: #0284c7;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:hover {
+      background: #0369a1;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="chat-container">
+    <div class="chat-header">AquaSentinel • Health Triage</div>
+    <div id="chat-box">
+      <div class="message bot-msg">
+        Hello! I am the AquaSentinel Community Assistant. Please describe any water symptoms or tap water changes you are experiencing.
+      </div>
+    </div>
+    <div class="input-area">
+      <input type="text" id="user-input" placeholder="Type your symptoms here..." />
+      <button id="send-btn" onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+
+  <!-- JavaScript connection logic -->
+  <script>
+    // Enable sending with the "Enter" key
+    document.getElementById("user-input").addEventListener("keypress", function(e) {
+      if (e.key === "Enter") {
+        sendMessage();
+      }
+    });
+
+    async function sendMessage() {
+      const input = document.getElementById("user-input");
+      const chatBox = document.getElementById("chat-box");
+      const message = input.value.trim();
+
+      if (!message) return;
+
+      // 1. Render user message in chat
+      chatBox.innerHTML += `<div class="message user-msg">${message}</div>`;
+      input.value = "";
+      chatBox.scrollTop = chatBox.scrollHeight;
+
+      // 2. Placeholder loading message
+      const loadingId = "loading-" + Date.now();
+      chatBox.innerHTML += `<div class="message bot-msg" id="${loadingId}"><em>Analyzing report...</em></div>`;
+      chatBox.scrollTop = chatBox.scrollHeight;
+
+      try {
+        // 3. Send message to Python Flask backend
+        const response = await fetch("http://127.0.0.1:5000/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: message })
+        });
+
+        const data = await response.json();
+
+        // 4. Replace placeholder with LLM reply
+        document.getElementById(loadingId).innerText = data.reply;
+        chatBox.scrollTop = chatBox.scrollHeight;
+
+      } catch (error) {
+        document.getElementById(loadingId).innerText = "Error: Unable to connect to backend server. Make sure app.py is running.";
+      }
+    }
+  </script>
+</body>
+</html>

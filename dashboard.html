@@ -10,6 +10,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
     <style>
 
         * {
@@ -343,6 +345,71 @@
             cursor: pointer;
         }
 
+        /* ================= RISK MAP ================= */
+
+        #riskMap {
+            height: 400px;
+            width: 100%;
+            margin-top: 20px;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        /* ================= AREA HIGHLIGHT ================= */
+
+        .area {
+            cursor: pointer;
+            transition: box-shadow 0.15s ease, transform 0.15s ease;
+        }
+
+        .area.selected {
+            box-shadow: 0 0 0 3px #087ea4 inset;
+            transform: translateY(-2px);
+        }
+
+        /* ================= WARNING SEVERITY VARIANTS ================= */
+
+        .warning-section-red {
+            border-left-color: #d63031 !important;
+            background: #fff0f0 !important;
+        }
+
+        .warning-section-orange {
+            border-left-color: #e09a00 !important;
+            background: #fff8df !important;
+        }
+
+        .warning-section-green {
+            border-left-color: #2e9e46 !important;
+            background: #f0fdf3 !important;
+        }
+
+        .warning-title-red {
+            color: #b00000;
+        }
+
+        .warning-title-orange {
+            color: #9a6500;
+        }
+
+        .warning-title-green {
+            color: #1f7a34;
+        }
+
+        /* ================= PREVENTION ================= */
+
+        .prevention-box {
+            list-style: none;
+            padding: 15px;
+            margin-top: 12px;
+            background: #f6fbfd;
+            border-radius: 10px;
+        }
+
+        .prevention-box li {
+            margin: 8px 0;
+        }
+
         /* ================= REPORT ================= */
 
         select,
@@ -381,6 +448,18 @@
 
         /* ================= CHATBOT ================= */
 
+        .chatbot-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.55);
+            z-index: 19;
+        }
+
+        .chatbot-backdrop.active {
+            display: block;
+        }
+
         .chatbot {
             position: fixed;
             right: 25px;
@@ -391,6 +470,20 @@
             box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
             overflow: hidden;
             z-index: 20;
+
+            display: flex;
+            flex-direction: column;
+
+            transition: all 0.25s ease;
+        }
+
+        /* Zoomed / big-screen state */
+        .chatbot.expanded {
+            right: 50%;
+            bottom: 50%;
+            transform: translate(50%, 50%);
+            width: min(720px, 92vw);
+            height: min(80vh, 760px);
         }
 
         .chat-header {
@@ -398,6 +491,41 @@
             color: white;
             padding: 15px;
             font-weight: bold;
+
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .chat-header-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .chat-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .chat-icon-btn {
+            background: rgba(255, 255, 255, 0.18);
+            border: none;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 7px;
+            cursor: pointer;
+            font-size: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .chat-icon-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
         }
 
         .chat-body {
@@ -405,6 +533,13 @@
             padding: 12px;
             overflow-y: auto;
             font-size: 14px;
+            flex: 1;
+        }
+
+        .chatbot.expanded .chat-body {
+            height: auto;
+            font-size: 15px;
+            padding: 20px;
         }
 
         .bot-message {
@@ -422,6 +557,16 @@
             text-align: right;
         }
 
+        .bot-message.thinking {
+            font-style: italic;
+            color: #666;
+        }
+
+        .bot-message.error-message {
+            background: #ffe3e3;
+            color: #a30000;
+        }
+
         .chat-input {
             display: flex;
             border-top: 1px solid #ddd;
@@ -431,6 +576,11 @@
             border: none;
             flex: 1;
             padding: 12px;
+        }
+
+        .chatbot.expanded .chat-input input {
+            padding: 16px;
+            font-size: 15px;
         }
 
         .chat-input button {
@@ -504,6 +654,11 @@
                 bottom: 15px;
             }
 
+            .chatbot.expanded {
+                width: 94vw;
+                height: 88vh;
+            }
+
         }
 
     </style>
@@ -558,15 +713,15 @@
 
                 <h3>Overall Risk</h3>
 
-                <div class="big-number moderate">
+                <div class="big-number moderate" id="overallRiskBadge">
                     🟡 Moderate
                 </div>
 
                 <div class="risk-meter">
-                    <div class="risk-fill"></div>
+                    <div class="risk-fill" id="riskFill"></div>
                 </div>
 
-                <small>Risk Score: 72/100</small>
+                <small id="riskScoreText">Risk Score: 72/100</small>
 
             </div>
 
@@ -575,7 +730,7 @@
 
                 <h3>Reported Cases</h3>
 
-                <div class="big-number">
+                <div class="big-number" id="reportedCasesCount">
                     24
                 </div>
 
@@ -588,11 +743,11 @@
 
                 <h3>Water Status</h3>
 
-                <div class="big-number">
+                <div class="big-number" id="waterStatusBadge">
                     ⚠️ Check
                 </div>
 
-                <span>Verification recommended</span>
+                <span id="waterStatusSub">Verification recommended</span>
 
             </div>
 
@@ -601,7 +756,7 @@
 
                 <h3>Active Alerts</h3>
 
-                <div class="big-number red">
+                <div class="big-number red" id="activeAlertsCount">
                     2
                 </div>
 
@@ -622,24 +777,28 @@
 
                 <h2>💧 Water Quality</h2>
 
+                <p style="margin-top:-6px;color:#888;font-size:12px;">
+                    Live sensor readings (simulated demo data, refreshes automatically)
+                </p>
+
                 <div class="quality-row">
                     <span>pH</span>
-                    <span class="green">Normal</span>
+                    <span class="green" id="phValue">7.1 · Normal</span>
                 </div>
 
                 <div class="quality-row">
                     <span>Turbidity</span>
-                    <span class="red">⚠️ High</span>
+                    <span class="red" id="turbidityValue">6.4 NTU · High</span>
                 </div>
 
                 <div class="quality-row">
                     <span>Chlorine</span>
-                    <span class="red">⚠️ Low</span>
+                    <span class="red" id="chlorineValue">0.12 mg/L · Low</span>
                 </div>
 
                 <div class="quality-row">
                     <span>Temperature</span>
-                    <span class="green">Normal</span>
+                    <span class="green" id="tempValue">26.4°C · Normal</span>
                 </div>
 
             </section>
@@ -700,12 +859,12 @@
 
                 <div class="weather-item">
                     🌧️ Rainfall
-                    <strong>42 mm</strong>
+                    <strong id="rainfallValue">42 mm</strong>
                 </div>
 
                 <div class="weather-item">
                     🌊 Flood Risk
-                    <strong>High</strong>
+                    <strong id="floodRiskValue">High</strong>
                 </div>
 
                 <div class="weather-item">
@@ -734,25 +893,25 @@
 
             <div class="area-grid">
 
-                <div class="area area-normal">
+                <div class="area area-normal" data-area="Area A">
                     Area A
                     <br>
                     🟢 Normal
                 </div>
 
-                <div class="area area-moderate">
+                <div class="area area-moderate" data-area="Area B">
                     Area B
                     <br>
                     🟡 Moderate
                 </div>
 
-                <div class="area area-high">
+                <div class="area area-high" data-area="Area C">
                     Area C
                     <br>
                     🔴 High
                 </div>
 
-                <div class="area area-normal">
+                <div class="area area-normal" data-area="Area D">
                     Area D
                     <br>
                     🟢 Normal
@@ -784,6 +943,12 @@
 
             </div>
 
+            <div id="riskMap"></div>
+
+            <p style="color:#888;font-size:12px;margin-top:10px;">
+                🔴 High risk &nbsp; 🟡 Moderate &nbsp; 🟢 Normal — click an area card below to jump to it on the map.
+            </p>
+
         </section>
 
 
@@ -792,11 +957,11 @@
 
         <!-- ================= EARLY WARNING ================= -->
 
-        <section class="section warning">
+        <section class="section warning" id="earlyWarningSection">
 
             <h2>🚨 Early Warning</h2>
 
-            <div class="warning-title">
+            <div class="warning-title" id="warningTitle">
                 🟡 PRE-OUTBREAK WARNING — Area C
             </div>
 
@@ -805,18 +970,18 @@
             </p>
 
             <p>
-                <strong>Risk Score: 72/100</strong>
+                <strong id="warningScoreText">Risk Score: 72/100</strong>
             </p>
 
             <div class="signal-list">
 
-                <div>💧 Turbidity: <strong>High</strong></div>
+                <div>💧 Turbidity: <strong id="signalTurbidity">High</strong></div>
 
-                <div>🧪 Chlorine: <strong>Low</strong></div>
+                <div>🧪 Chlorine: <strong id="signalChlorine">Low</strong></div>
 
-                <div>🌧️ Heavy Rainfall: <strong>Detected</strong></div>
+                <div>🌧️ Heavy Rainfall: <strong id="signalRainfall">Detected</strong></div>
 
-                <div>🌊 Flooding: <strong>Detected</strong></div>
+                <div>🌊 Flooding: <strong id="signalFlooding">Detected</strong></div>
 
                 <div>🏥 Health Cases: <strong>Normal</strong></div>
 
@@ -827,9 +992,9 @@
 
             <div class="reason">
 
-                <strong>💡 Why is Area C at risk?</strong>
+                <strong>💡 Why is this area at risk?</strong>
 
-                <ul>
+                <ul id="reasonList">
 
                     <li>Turbidity is above the normal baseline.</li>
 
@@ -898,20 +1063,49 @@
         <br>
 
 
+        <!-- ================= PREVENTION ================= -->
+
+        <section class="section">
+
+            <h2>🛡️ Prevention Guide</h2>
+
+            <p style="color:#666;">
+                Tailored steps based on the current water-quality signals above.
+            </p>
+
+            <button
+                class="submit-btn"
+                id="preventionToggleBtn"
+                onclick="togglePrevention()">
+                Show Prevention Steps
+            </button>
+
+            <ul class="prevention-box" id="preventionList" style="display:none;"></ul>
+
+        </section>
+
+
+        <br>
+
+
         <!-- ================= RECENT ALERTS ================= -->
 
         <section class="section">
 
             <h2>🚨 Recent Alerts</h2>
 
-            <div class="alert-item">
-                🔴 <strong>Area C:</strong>
-                Potential water contamination risk detected.
-            </div>
+            <div id="recentAlertsList">
 
-            <div class="alert-item">
-                🟡 <strong>Area B:</strong>
-                Water quality needs verification.
+                <div class="alert-item">
+                    🔴 <strong>Area C:</strong>
+                    Potential water contamination risk detected.
+                </div>
+
+                <div class="alert-item">
+                    🟡 <strong>Area B:</strong>
+                    Water quality needs verification.
+                </div>
+
             </div>
 
         </section>
@@ -930,22 +1124,22 @@
 
                 <div class="weather-item">
                     📅 Today
-                    <strong>18</strong>
+                    <strong id="todayCount">18</strong>
                 </div>
 
                 <div class="weather-item">
                     📊 This Week
-                    <strong>73</strong>
+                    <strong id="weekCount">73</strong>
                 </div>
 
                 <div class="weather-item">
                     ✅ Verified
-                    <strong>51</strong>
+                    <strong id="verifiedCount">51</strong>
                 </div>
 
                 <div class="weather-item">
                     ⏳ Pending
-                    <strong>22</strong>
+                    <strong id="pendingCount">22</strong>
                 </div>
 
             </div>
@@ -1067,12 +1261,39 @@
     </footer>
 
 
+    <!-- ================= CHATBOT BACKDROP (shown only when zoomed) ================= -->
+
+    <div class="chatbot-backdrop" id="chatBackdrop" onclick="toggleZoom(false)"></div>
+
     <!-- ================= CHATBOT ================= -->
 
-    <div class="chatbot">
+    <div class="chatbot" id="chatbotWidget">
 
         <div class="chat-header">
-            🤖 WaterSafe Assistant
+
+            <div class="chat-header-title">
+                🤖 WaterSafe Assistant
+            </div>
+
+            <div class="chat-header-actions">
+
+                <button
+                    class="chat-icon-btn"
+                    id="zoomBtn"
+                    title="Expand to full screen"
+                    onclick="toggleZoom()">
+                    ⛶
+                </button>
+
+                <button
+                    class="chat-icon-btn"
+                    title="New conversation"
+                    onclick="resetChat()">
+                    ↺
+                </button>
+
+            </div>
+
         </div>
 
 
@@ -1082,7 +1303,7 @@
 
                 Hello! 👋
                 <br>
-                I can help you with water alerts, risks, reports and location.
+                I can help you with water alerts, risks, reports and location. Describe any symptoms or water changes you're seeing.
 
             </div>
 
@@ -1108,6 +1329,8 @@
 
     <!-- ================= JAVASCRIPT ================= -->
 
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="map.js"></script>
     <script src="config.js"></script>
     <script>
 
@@ -1115,69 +1338,303 @@
 
         (async () => {
             const user = await requireAuth();
+            window.__currentUser = user;
             if (user) {
                 document.getElementById('userLabel').textContent = displayName(user);
             }
         })();
 
+        // NOTE: detectLocation() is defined in map.js now — it both updates
+        // #locationText AND drops a marker on #riskMap.
 
-        /* ================= LOCATION ================= */
 
-        function detectLocation() {
+        /* ================= LIVE WATER-QUALITY ENGINE (simulated) =================
+           Everything in this block is DEMO data — there's no real sensor
+           feed wired up. Swap randomBetween() calls for a fetch() to your
+           actual telemetry source when you have one, and the rest of the
+           UI-update logic (renderWaterQuality/recalcRisk/updateRiskUI) can
+           stay exactly as-is.
+        ================================================================== */
 
-            const locationText =
-                document.getElementById("locationText");
+        const state = {
+            ph: 7.1,
+            turbidity: 6.4,
+            chlorine: 0.12,
+            temperature: 26.4,
+            rainfall: 42,
+            floodRisk: "High",
+            reportsToday: 18,
+            reportsWeek: 73,
+            pending: 22,
+            totalReports: 24,
+            warningArea: "Area C"
+        };
 
-            if (!navigator.geolocation) {
+        function randomBetween(min, max) {
+            return Math.round((Math.random() * (max - min) + min) * 10) / 10;
+        }
 
-                locationText.innerText =
-                    "Geolocation is not supported by your browser.";
+        function setQualityRow(id, valueText, isAbnormal, abnormalWord) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const word = isAbnormal ? (abnormalWord || "Abnormal") : "Normal";
+            el.textContent = valueText + " · " + word;
+            el.className = isAbnormal ? "red" : "green";
+        }
 
-                return;
-            }
+        function renderWaterQuality() {
 
-            locationText.innerText =
-                "Detecting your location...";
+            setQualityRow("phValue", state.ph.toFixed(1), state.ph < 6.5 || state.ph > 8.5);
+            setQualityRow("turbidityValue", state.turbidity.toFixed(1) + " NTU", state.turbidity > 4, "High");
+            setQualityRow("chlorineValue", state.chlorine.toFixed(2) + " mg/L", state.chlorine < 0.2, "Low");
+            setQualityRow("tempValue", state.temperature.toFixed(1) + "°C", state.temperature > 31 || state.temperature < 15);
 
-            navigator.geolocation.getCurrentPosition(
+            const rainfallEl = document.getElementById("rainfallValue");
+            if (rainfallEl) rainfallEl.textContent = Math.round(state.rainfall) + " mm";
 
-                function(position) {
-
-                    const latitude =
-                        position.coords.latitude.toFixed(5);
-
-                    const longitude =
-                        position.coords.longitude.toFixed(5);
-
-                    locationText.innerText =
-                        "Latitude: " + latitude +
-                        " | Longitude: " + longitude;
-
-                },
-
-                function(error) {
-
-                    locationText.innerText =
-                        "Location permission was denied or unavailable.";
-
-                }
-
-            );
+            const floodEl = document.getElementById("floodRiskValue");
+            if (floodEl) floodEl.textContent = state.floodRisk;
 
         }
+
+        function getFlags() {
+            return {
+                phAbnormal: state.ph < 6.5 || state.ph > 8.5,
+                turbidityAbnormal: state.turbidity > 4,
+                chlorineAbnormal: state.chlorine < 0.2,
+                tempAbnormal: state.temperature > 31 || state.temperature < 15,
+                floodRisk: state.floodRisk,
+                rainfallHigh: state.rainfall > 40
+            };
+        }
+
+        function recalcRisk() {
+
+            const flags = getFlags();
+
+            let score = 20;
+            if (flags.turbidityAbnormal) score += 20;
+            if (flags.chlorineAbnormal) score += 20;
+            if (flags.phAbnormal) score += 15;
+            if (flags.tempAbnormal) score += 8;
+            if (flags.floodRisk === "High") score += 12;
+            if (flags.rainfallHigh) score += 7;
+            score = Math.max(0, Math.min(100, score));
+
+            const level = score >= 75 ? "red" : score >= 40 ? "orange" : "green";
+
+            updateRiskUI(score, level, flags);
+            renderPreventionList(flags);
+
+        }
+
+        function updateRiskUI(score, level, flags) {
+
+            const badgeClass = level === "red" ? "red" : level === "orange" ? "moderate" : "green";
+            const badgeText = level === "red" ? "🔴 High" : level === "orange" ? "🟡 Moderate" : "🟢 Normal";
+            const fillColor = level === "red" ? "#d63031" : level === "orange" ? "#f0a000" : "#2e9e46";
+
+            const overallBadge = document.getElementById("overallRiskBadge");
+            overallBadge.className = "big-number " + badgeClass;
+            overallBadge.textContent = badgeText;
+
+            const fill = document.getElementById("riskFill");
+            fill.style.width = score + "%";
+            fill.style.background = fillColor;
+
+            document.getElementById("riskScoreText").textContent = "Risk Score: " + score + "/100";
+
+            document.getElementById("waterStatusBadge").textContent = level === "green" ? "✅ Safe" : "⚠️ Check";
+            document.getElementById("waterStatusSub").textContent = level === "green" ? "No action needed" : "Verification recommended";
+
+            const section = document.getElementById("earlyWarningSection");
+            section.classList.remove("warning-section-red", "warning-section-orange", "warning-section-green");
+            section.classList.add("warning-section-" + level);
+
+            const title = document.getElementById("warningTitle");
+            title.className = "warning-title warning-title-" + level;
+            title.textContent =
+                (level === "red" ? "🔴 CONTAMINATION WARNING — " :
+                 level === "orange" ? "🟡 PRE-OUTBREAK WARNING — " :
+                 "🟢 NO ACTIVE WARNING — ") + state.warningArea;
+
+            document.getElementById("warningScoreText").textContent = "Risk Score: " + score + "/100";
+
+            document.getElementById("signalTurbidity").textContent = flags.turbidityAbnormal ? "High" : "Normal";
+            document.getElementById("signalChlorine").textContent = flags.chlorineAbnormal ? "Low" : "Normal";
+            document.getElementById("signalRainfall").textContent = flags.rainfallHigh ? "Detected" : "Not significant";
+            document.getElementById("signalFlooding").textContent = flags.floodRisk;
+
+            const reasons = [];
+            if (flags.turbidityAbnormal) reasons.push("Turbidity is above the normal baseline.");
+            if (flags.chlorineAbnormal) reasons.push("Chlorine level is below the normal baseline.");
+            if (flags.rainfallHigh) reasons.push("Heavy rainfall has been detected.");
+            if (flags.floodRisk === "High") reasons.push("Flooding can increase contamination risk.");
+            if (flags.phAbnormal) reasons.push("pH is outside the safe drinking range.");
+            if (reasons.length === 0) reasons.push("No abnormal signals detected right now.");
+
+            const reasonList = document.getElementById("reasonList");
+            reasonList.innerHTML = "";
+            reasons.forEach(function (r) {
+                const li = document.createElement("li");
+                li.textContent = r;
+                reasonList.appendChild(li);
+            });
+
+        }
+
+        function renderPreventionList(flags) {
+
+            const tips = [];
+
+            if (flags.turbidityAbnormal) tips.push("💧 Boil water for at least 1 minute, or run it through a fine cloth/filter before drinking.");
+            if (flags.chlorineAbnormal) tips.push("🧪 Use chlorine tablets or a UV purifier until disinfection is restored.");
+            if (flags.floodRisk === "High") tips.push("🌊 Avoid wading through flood water — it can carry sewage and contaminants.");
+            if (flags.rainfallHigh) tips.push("🌧️ Cover open wells and storage tanks during heavy rainfall.");
+            if (flags.phAbnormal) tips.push("⚗️ Avoid drinking directly from the source until a lab test confirms safe pH.");
+            if (tips.length === 0) tips.push("✅ No active risk signals — continue routine testing and normal precautions.");
+            tips.push("📞 If symptoms appear (vomiting, diarrhea, fever), contact the health center immediately.");
+
+            const ul = document.getElementById("preventionList");
+            ul.innerHTML = "";
+            tips.forEach(function (t) {
+                const li = document.createElement("li");
+                li.textContent = t;
+                ul.appendChild(li);
+            });
+
+        }
+
+        function togglePrevention() {
+            const list = document.getElementById("preventionList");
+            const btn = document.getElementById("preventionToggleBtn");
+            const showing = list.style.display === "block";
+            list.style.display = showing ? "none" : "block";
+            btn.textContent = showing ? "Show Prevention Steps" : "Hide Prevention Steps";
+        }
+
+        // Initial paint, then keep "refreshing" on a timer to simulate a
+        // live feed. Replace the body of this interval with a real fetch
+        // once you have an actual sensor API.
+        renderWaterQuality();
+        recalcRisk();
+
+        setInterval(function () {
+            state.ph = randomBetween(6.3, 8.4);
+            state.turbidity = randomBetween(0.5, 8.5);
+            state.chlorine = randomBetween(0.05, 1.2);
+            state.temperature = randomBetween(21, 32);
+            renderWaterQuality();
+            recalcRisk();
+        }, 15000);
 
 
         /* ================= REPORT ================= */
 
-        function submitReport(event) {
+        function addAlertToDashboard(area, problem, description) {
+            const list = document.getElementById("recentAlertsList");
+            const item = document.createElement("div");
+            item.className = "alert-item";
+            item.innerHTML = "🔴 <strong>" + area + ":</strong> " + problem + " — " + description;
+            list.prepend(item);
+        }
+
+        function bumpReportCounters() {
+
+            state.reportsToday += 1;
+            state.reportsWeek += 1;
+            state.pending += 1;
+            state.totalReports += 1;
+
+            document.getElementById("todayCount").textContent = state.reportsToday;
+            document.getElementById("weekCount").textContent = state.reportsWeek;
+            document.getElementById("pendingCount").textContent = state.pending;
+            document.getElementById("reportedCasesCount").textContent = state.totalReports;
+            document.getElementById("activeAlertsCount").textContent =
+                document.getElementById("recentAlertsList").children.length;
+
+        }
+
+        function escalateAreaCard(area) {
+            const card = document.querySelector('.area[data-area="' + area + '"]');
+            if (!card) return;
+            card.classList.remove("area-normal", "area-moderate");
+            card.classList.add("area-high");
+            card.innerHTML = area + "<br>🔴 High";
+        }
+
+        function applyReportImpact(area, problem) {
+
+            if (problem === "Dirty Water") {
+                state.turbidity = Math.min(10, state.turbidity + randomBetween(2, 4));
+            } else if (problem === "Bad Smell") {
+                state.chlorine = Math.max(0, state.chlorine - randomBetween(0.1, 0.3));
+            } else if (problem === "Water Leakage") {
+                state.turbidity = Math.min(10, state.turbidity + randomBetween(0.5, 1.5));
+            } else if (problem === "Sewage Leakage") {
+                state.turbidity = Math.min(10, state.turbidity + randomBetween(3, 5));
+                state.chlorine = Math.max(0, state.chlorine - randomBetween(0.2, 0.4));
+            } else if (problem === "Flooding") {
+                state.floodRisk = "High";
+                state.rainfall = Math.min(120, state.rainfall + randomBetween(15, 30));
+            }
+
+            state.warningArea = area;
+            renderWaterQuality();
+            recalcRisk();
+            escalateAreaCard(area);
+
+            if (typeof setZoneRisk === "function") {
+                setZoneRisk(area, "red", "New citizen report: " + problem);
+            }
+
+        }
+
+        function notifyAssistant(area, problem) {
+            activeChatArea = area;
+            appendChatMessage(
+                "🤖 New citizen report received — " + problem + " in " + area + ". I've factored this into the current risk assessment.",
+                "bot-message"
+            );
+        }
+
+        async function submitReport(event) {
 
             event.preventDefault();
 
-            const area =
-                document.getElementById("area").value;
+            const area = document.getElementById("area").value;
+            const problem = document.getElementById("problem").value;
+            const description = document.getElementById("description").value.trim();
 
-            const problem =
-                document.getElementById("problem").value;
+            // 1. Update the dashboard immediately — don't make the user
+            //    wait on the network for the UI to reflect their report.
+            addAlertToDashboard(area, problem, description);
+            bumpReportCounters();
+            applyReportImpact(area, problem);
+            notifyAssistant(area, problem);
+
+            // 2. Persist to the backend (community_messages table), best-effort.
+            try {
+
+                const currentUser = window.__currentUser;
+                const reporterName =
+                    (currentUser && typeof displayName === "function")
+                        ? displayName(currentUser)
+                        : "Guest";
+
+                await fetch("/api/community/report-issue", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        client_id: getChatClientId(),
+                        name: reporterName,
+                        message: "[" + area + " / " + problem + "] " + description
+                    })
+                });
+
+            } catch (error) {
+                // Non-fatal for the demo — the dashboard already reflects the report.
+            }
 
             alert(
                 "Report submitted successfully!\n\n" +
@@ -1192,108 +1649,140 @@
 
         /* ================= CHATBOT ================= */
 
-        function sendMessage() {
+        // Same-origin API base (main.py serves this page AND /api/chat).
+        // If you ever host the frontend separately, point this at the
+        // FastAPI server's URL instead, e.g. "https://your-api.example.com".
+        const CHAT_API_BASE = "";
 
-            const input =
-                document.getElementById("chatInput");
+        // Persist one client id for this browser so the backend can keep
+        // a running conversation per user (mirrors the client_id pattern
+        // already used across the community endpoints).
+        function getChatClientId() {
+            const key = "watersafe_chat_client_id";
+            let id = localStorage.getItem(key);
+            if (!id) {
+                id = "chat_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+                localStorage.setItem(key, id);
+            }
+            return id;
+        }
 
-            const chatBody =
-                document.getElementById("chatBody");
+        // Track which area the user last mentioned/clicked so the assistant's
+        // telemetry context is relevant. Defaults to the flagged Area C.
+        let activeChatArea = "Area C";
 
-            const message =
-                input.value.trim();
+        document.querySelectorAll(".area").forEach(function(el) {
+            el.addEventListener("click", function() {
+
+                activeChatArea = el.dataset.area || activeChatArea;
+
+                document.querySelectorAll(".area").forEach(function(a) {
+                    a.classList.remove("selected");
+                });
+                el.classList.add("selected");
+
+                if (typeof focusZone === "function") {
+                    focusZone(activeChatArea);
+                }
+
+            });
+        });
+
+        function appendChatMessage(text, className) {
+            const chatBody = document.getElementById("chatBody");
+            const el = document.createElement("div");
+            el.className = className;
+            el.innerText = text;
+            chatBody.appendChild(el);
+            chatBody.scrollTop = chatBody.scrollHeight;
+            return el;
+        }
+
+        async function sendMessage() {
+
+            const input = document.getElementById("chatInput");
+            const message = input.value.trim();
 
             if (message === "") {
                 return;
             }
 
-
-            /* Add user message */
-
-            const userMessage =
-                document.createElement("div");
-
-            userMessage.className =
-                "user-message";
-
-            userMessage.innerText =
-                message;
-
-            chatBody.appendChild(userMessage);
-
-
-            /* Generate bot response */
-
-            let response =
-                "I can help you with water quality, alerts, risk, reports and location.";
-
-
-            const lowerMessage =
-                message.toLowerCase();
-
-
-            if (lowerMessage.includes("water")) {
-
-                response =
-                    "If water looks dirty, smells unusual or its quality is uncertain, please submit a water issue report.";
-
-            }
-
-            else if (lowerMessage.includes("alert")) {
-
-                response =
-                    "Area C currently has a pre-outbreak warning because multiple environmental signals are abnormal.";
-
-            }
-
-            else if (lowerMessage.includes("risk")) {
-
-                response =
-                    "The current overall risk score is 72/100. Main signals are high turbidity, low chlorine, rainfall and flooding.";
-
-            }
-
-            else if (lowerMessage.includes("report")) {
-
-                response =
-                    "Go to the 'Report Water Issue' section, select your area and problem, then submit the report.";
-
-            }
-
-            else if (lowerMessage.includes("location")) {
-
-                response =
-                    "Click 'Detect My Location' to request your browser's current coordinates.";
-
-            }
-
-
-            /* Add bot response */
-
-            setTimeout(function() {
-
-                const botMessage =
-                    document.createElement("div");
-
-                botMessage.className =
-                    "bot-message";
-
-                botMessage.innerText =
-                    response;
-
-                chatBody.appendChild(botMessage);
-
-                chatBody.scrollTop =
-                    chatBody.scrollHeight;
-
-            }, 300);
-
-
+            appendChatMessage(message, "user-message");
             input.value = "";
 
-            chatBody.scrollTop =
-                chatBody.scrollHeight;
+            const thinkingEl = appendChatMessage("Thinking…", "bot-message thinking");
 
+            try {
+
+                const response = await fetch(CHAT_API_BASE + "/api/chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        client_id: getChatClientId(),
+                        message: message,
+                        area: activeChatArea
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || "Request failed.");
+                }
+
+                thinkingEl.classList.remove("thinking");
+                thinkingEl.innerText = data.reply;
+
+            } catch (error) {
+
+                thinkingEl.classList.remove("thinking");
+                thinkingEl.classList.add("error-message");
+                thinkingEl.innerText = "Sorry, I couldn't reach the assistant. " + error.message;
+
+            }
+
+        }
+
+        async function resetChat() {
+            try {
+                await fetch(CHAT_API_BASE + "/api/chat/reset", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ client_id: getChatClientId() })
+                });
+            } catch (error) {
+                // Non-fatal — the server-side history will just carry on.
+            }
+
+            const chatBody = document.getElementById("chatBody");
+            chatBody.innerHTML = "";
+            appendChatMessage(
+                "Started a new conversation. How can I help?",
+                "bot-message"
+            );
+        }
+
+        /* ================= ZOOM / FULLSCREEN ================= */
+
+        function toggleZoom(forceState) {
+
+            const widget = document.getElementById("chatbotWidget");
+            const backdrop = document.getElementById("chatBackdrop");
+            const zoomBtn = document.getElementById("zoomBtn");
+
+            const shouldExpand =
+                typeof forceState === "boolean"
+                    ? forceState
+                    : !widget.classList.contains("expanded");
+
+            widget.classList.toggle("expanded", shouldExpand);
+            backdrop.classList.toggle("active", shouldExpand);
+            zoomBtn.innerText = shouldExpand ? "⤡" : "⛶";
+            zoomBtn.title = shouldExpand ? "Exit full screen" : "Expand to full screen";
+
+            if (shouldExpand) {
+                document.getElementById("chatInput").focus();
+            }
         }
 
     </script>
