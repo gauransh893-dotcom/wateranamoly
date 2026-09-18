@@ -5,7 +5,7 @@
 // The publishable key is safe to expose in browser code.
 // =========================================================
 const SUPABASE_URL = "https://yworpibfejlemnwctper.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY = "sb_secret_rDccaB2uOJMxd4WsDPk4lA_JxjLC5cm";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_lQzCFi_QFXVmBNSr8K8IJA_fhHmLVmC";
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
